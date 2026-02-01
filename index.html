@@ -35,31 +35,29 @@ html, body {
 /* ===== BEFORE / AFTER ===== */
 .before-after {
   position: relative;
-  width: auto;
-  height: 80vh;
   max-width: 80vw;
-  aspect-ratio: auto;
+  max-height: 100%;
+  overflow: hidden;
+  user-select: none;
 }
 
-/* both images must be identical in layout */
 .before-after img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-/* layers */
-.after {
-  z-index: 1;
+  display: block;
+  max-height: 80vh;
+  width: auto;
 }
 
 .before {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   z-index: 2;
   overflow: hidden;
+}
+
+.after {
+  position: relative;
+  z-index: 1;
 }
   
 /* divider line */
