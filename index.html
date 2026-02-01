@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Image Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: black;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+  cursor: none;
+}
+
+/* ===== GRID LAYOUT ===== */
+#viewer {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 10vh 80vh 10vh;
+  position: relative;
+}
+
+/* ===== IMAGE ROW ===== */
+#image-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== BEFORE / AFTER ===== */
+.before-after {
+  position: relative;
+  max-width: 80vw;
+  max-height: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+.before-after img {
+  display: block;
+  max-height: 80vh;
+  width: auto;
+}
+
+.before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.after {
+  position: relative;
+  z-index: 1;
+}
+
+/* divider line */
+.slider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  background: white;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* invisible grab area */
+.slider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -12px;
+  width: 27px;
+  height: 100%;
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+
+/* visible grab handle */
+.slider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  background: black;
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+  pointer-events: none;
+}
+
+/* ===== SINGLE IMAGE ===== */
+#image {
+  max-width: 80vw;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ===== CAPTION ROW ===== */
+#caption-row {
+  display: flex;
+  align-items: center;      /* vertical centering */
+  justify-content: center;  /* center caption block */
+}
+
+#caption {
+  color: white;
+  font-size: 0.95rem;
+  opacity: 0.9;
+  white-space: pre-wrap;
+  text-align: left;         /* left-aligned text */
+}
+
+/* ===== UI ===== */
+.ui {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.ui.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: none;
+  font-size: 2.5rem;
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+}
+
+#prev { left: 10px; }
+#next { right: 10px; }
+
+#counter {
+  position: absolute;
+  bottom: 12vh;
+  right: 12px;
+  background: rgba(0,0,0,0.6);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: white;
+}
+
+#fullscreen {
+  position: absolute;
+  bottom: 12vh;
+  left: 12px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div id="viewer">
+  <div></div>
+
+  <div id="image-row"></div>
+
+  <div id="caption-row">
+    <div id="caption"></div>
+  </div>
+
+  <button id="prev" class="nav ui">❮</button>
+  <button id="next" class="nav ui">❯</button>
+  <div id="counter" class="ui"></div>
+  <button id="fullscreen" class="ui">Fullscreen (F)</button>
+</div>
+
+<script>
+/* ===== CONFIG ===== */
+const IMAGE_COUNT = 74;
+const PREFIX = "IMG_";
+const IMG_EXT = ".jpg";
+const TXT_EXT = ".txt";
+const PAD = 4;
+const UI_HIDE_DELAY = 2000;
+/* ================== */
+
+const images = [];
+const texts = [];
+
+for (let i = 1; i <= IMAGE_COUNT; i++) {
+  const n = String(i).padStart(PAD, "0");
+  images.push(`${PREFIX}${n}${IMG_EXT}`);
+  texts.push(`${PREFIX}${n}${TXT_EXT}`);
+}
+
+let index = 0;
+let uiTimeout;
+
+const imageRow = document.getElementById("image-row");
+const caption = document.getElementById("caption");
+const counter = document.getElementById("counter");
+const viewer = document.getElementById("viewer");
+const ui = document.querySelectorAll(".ui");
+
+async function loadText(path) {
+  try {
+    const r = await fetch(path);
+    if (!r.ok) throw "";
+    return await r.text();
+  } catch {
+    return "";
+  }
+}
+
+async function imageExists(path) {
+  try {
+    const r = await fetch(path, { method: "HEAD" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+function clearImageRow() {
+  imageRow.innerHTML = "";
+}
+
+function syncCaptionWidth(target) {
+  const rect = target.getBoundingClientRect();
+  caption.style.width = rect.width + "px";
+}
+
+function getActiveImageTarget() {
+  return (
+    document.querySelector(".before-after") ||
+    document.getElementById("image")
+  );
+}
+
+function createBeforeAfter(beforeSrc, afterSrc) {
+  const container = document.createElement("div");
+  container.className = "before-after";
+
+  const after = document.createElement("img");
+  after.src = afterSrc;
+  after.className = "after";
+
+  const beforeWrap = document.createElement("div");
+  beforeWrap.className = "before";
+  beforeWrap.style.width = "50%";
+
+  const before = document.createElement("img");
+  before.src = beforeSrc;
+
+  const slider = document.createElement("div");
+  slider.className = "slider";
+
+  beforeWrap.appendChild(before);
+  container.append(after, beforeWrap, slider);
+  imageRow.appendChild(container);
+
+  after.onload = () => syncCaptionWidth(container);
+
+  let dragging = false;
+
+  slider.addEventListener("mousedown", e => {
+    dragging = true;
+    e.preventDefault();
+  });
+
+  window.addEventListener("mouseup", () => dragging = false);
+
+  window.addEventListener("mousemove", e => {
+    if (!dragging) return;
+
+    const rect = container.getBoundingClientRect();
+    let x = e.clientX - rect.left;
+    x = Math.max(0, Math.min(x, rect.width));
+
+    const percent = (x / rect.width) * 100;
+    beforeWrap.style.width = percent + "%";
+    slider.style.left = percent + "%";
+  });
+}
+
+async function showImage(i) {
+  if (i < 0) i = images.length - 1;
+  if (i >= images.length) i = 0;
+  index = i;
+
+  const base = images[index];
+  const alt = base.replace(".jpg", "A.jpg");
+
+  clearImageRow();
+
+  if (await imageExists(alt)) {
+    createBeforeAfter(base, alt);
+  } else {
+    const img = document.createElement("img");
+    img.id = "image";
+    img.src = base;
+    img.onload = () => syncCaptionWidth(img);
+    imageRow.appendChild(img);
+  }
+
+  counter.textContent = `${index + 1} / ${images.length}`;
+  caption.textContent = await loadText(texts[index]);
+}
+
+function showUI() {
+  ui.forEach(e => e.classList.add("visible"));
+  document.body.style.cursor = "default";
+  clearTimeout(uiTimeout);
+  uiTimeout = setTimeout(hideUI, UI_HIDE_DELAY);
+}
+
+function hideUI() {
+  ui.forEach(e => e.classList.remove("visible"));
+  document.body.style.cursor = "none";
+}
+
+document.getElementById("prev").onclick = () => showImage(index - 1);
+document.getElementById("next").onclick = () => showImage(index + 1);
+
+document.addEventListener("mousemove", showUI);
+document.addEventListener("keydown", e => {
+  showUI();
+  if (e.key === "ArrowLeft") showImage(index - 1);
+  if (e.key === "ArrowRight") showImage(index + 1);
+  if (e.key.toLowerCase() === "f") toggleFullscreen();
+});
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) viewer.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+document.getElementById("fullscreen").onclick = toggleFullscreen;
+
+/* === keep caption aligned in fullscreen & resize === */
+document.addEventListener("fullscreenchange", () => {
+  const target = getActiveImageTarget();
+  if (target) syncCaptionWidth(target);
+});
+
+window.addEventListener("resize", () => {
+  const target = getActiveImageTarget();
+  if (target) syncCaptionWidth(target);
+});
+
+showImage(index);
+hideUI();
+</script>
+
+</body>
+</html>
